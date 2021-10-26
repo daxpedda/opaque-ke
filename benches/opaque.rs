@@ -42,7 +42,7 @@ fn server_setup(c: &mut Criterion) {
 
     c.bench_function(&format!("server setup ({})", SUFFIX), move |b| {
         b.iter(|| {
-            ServerSetup::<Default>::new(&mut rng).unwrap();
+            ServerSetup::<Default>::new(&mut rng);
         })
     });
 }
@@ -65,7 +65,7 @@ fn server_registration_start(c: &mut Criterion) {
     let mut rng = OsRng;
     let username = b"username";
     let password = b"password";
-    let server_setup = ServerSetup::<Default>::new(&mut rng).unwrap();
+    let server_setup = ServerSetup::<Default>::new(&mut rng);
     let client_registration_start_result =
         ClientRegistration::<Default>::start(&mut rng, &password[..]).unwrap();
 
@@ -88,7 +88,7 @@ fn client_registration_finish(c: &mut Criterion) {
     let mut rng = OsRng;
     let username = b"username";
     let password = b"password";
-    let server_setup = ServerSetup::<Default>::new(&mut rng).unwrap();
+    let server_setup = ServerSetup::<Default>::new(&mut rng);
     let client_registration_start_result =
         ClientRegistration::<Default>::start(&mut rng, &password[..]).unwrap();
     let server_registration_start_result = ServerRegistration::<Default>::start(
@@ -120,7 +120,7 @@ fn server_registration_finish(c: &mut Criterion) {
     let mut rng = OsRng;
     let username = b"username";
     let password = b"password";
-    let server_setup = ServerSetup::<Default>::new(&mut rng).unwrap();
+    let server_setup = ServerSetup::<Default>::new(&mut rng);
     let client_registration_start_result =
         ClientRegistration::<Default>::start(&mut rng, &password[..]).unwrap();
     let server_registration_start_result = ServerRegistration::<Default>::start(
@@ -164,7 +164,7 @@ fn server_login_start_real(c: &mut Criterion) {
     let mut rng = OsRng;
     let username = b"username";
     let password = b"password";
-    let server_setup = ServerSetup::<Default>::new(&mut rng).unwrap();
+    let server_setup = ServerSetup::<Default>::new(&mut rng);
     let client_registration_start_result =
         ClientRegistration::<Default>::start(&mut rng, &password[..]).unwrap();
     let server_registration_start_result = ServerRegistration::<Default>::start(
@@ -207,7 +207,7 @@ fn server_login_start_fake(c: &mut Criterion) {
     let mut rng = OsRng;
     let username = b"username";
     let password = b"password";
-    let server_setup = ServerSetup::<Default>::new(&mut rng).unwrap();
+    let server_setup = ServerSetup::<Default>::new(&mut rng);
     let client_login_start_result = ClientLogin::<Default>::start(&mut rng, &password[..]).unwrap();
 
     c.bench_function(
@@ -232,7 +232,7 @@ fn client_login_finish(c: &mut Criterion) {
     let mut rng = OsRng;
     let username = b"username";
     let password = b"password";
-    let server_setup = ServerSetup::<Default>::new(&mut rng).unwrap();
+    let server_setup = ServerSetup::<Default>::new(&mut rng);
     let client_registration_start_result =
         ClientRegistration::<Default>::start(&mut rng, &password[..]).unwrap();
     let server_registration_start_result = ServerRegistration::<Default>::start(
@@ -280,7 +280,7 @@ fn server_login_finish(c: &mut Criterion) {
     let mut rng = OsRng;
     let username = b"username";
     let password = b"password";
-    let server_setup = ServerSetup::<Default>::new(&mut rng).unwrap();
+    let server_setup = ServerSetup::<Default>::new(&mut rng);
     let client_registration_start_result =
         ClientRegistration::<Default>::start(&mut rng, &password[..]).unwrap();
     let server_registration_start_result = ServerRegistration::<Default>::start(
