@@ -169,7 +169,7 @@ fn registration_upload_roundtrip() -> Result<(), ProtocolError> {
     let mut nonce = [0u8; 32];
     rng.fill_bytes(&mut nonce);
 
-    let mut masking_key = vec![0u8; <sha2::Sha512 as Digest>::OutputSize::USIZE];
+    let mut masking_key = vec![0u8; sha2::Sha512::output_size()];
     rng.fill_bytes(&mut masking_key);
 
     let randomized_pwd_hasher = hkdf::Hkdf::new(None, &key);

@@ -6,7 +6,7 @@
 use crate::{
     ciphersuite::CipherSuite,
     errors::{utils::check_slice_size, InternalError, ProtocolError},
-    hash::Hash,
+    hash::{Hash, ProxyHash},
     key_exchange::group::KeGroup,
     keypair::{KeyPair, PublicKey},
     opaque::{bytestrings_from_identifiers, Identifiers},
@@ -15,14 +15,13 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use derive_where::DeriveWhere;
-use digest::Digest;
-use generic_array::{
-    sequence::Concat,
-    typenum::{Unsigned, U32},
-    GenericArray,
-};
+use digest::core_api::{BlockSizeUser, CoreProxy};
+use digest::{Digest, Output};
+use generic_array::sequence::Concat;
+use generic_array::typenum::{IsLess, Le, NonZero, Unsigned, U256, U32};
+use generic_array::GenericArray;
 use hkdf::Hkdf;
-use hmac::{Hmac, Mac, NewMac};
+use hmac::{Hmac, Mac};
 use rand::{CryptoRng, RngCore};
 use voprf::group::Group;
 use zeroize::Zeroize;
@@ -63,52 +62,65 @@ impl TryFrom<u8> for InnerEnvelopeMode {
 /// the confusion around the implementation of an RKR-secure encryption.
 #[derive(DeriveWhere)]
 #[derive_where(Clone, Debug, Eq, Hash, PartialEq, Zeroize(drop))]
-pub(crate) struct Envelope<CS: CipherSuite> {
+pub(crate) struct Envelope<CS: CipherSuite>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     mode: InnerEnvelopeMode,
     nonce: GenericArray<u8, NonceLen>,
-    hmac: GenericArray<u8, <CS::Hash as Digest>::OutputSize>,
+    hmac: Output<CS::Hash>,
 }
 
 // Note that this struct represents an envelope that has been "opened" with the asssociated
 // key. This key is also used to derive the export_key parameter, which is technically
 // unrelated to the envelope's encrypted and authenticated contents.
-pub(crate) struct OpenedEnvelope<CS: CipherSuite> {
+pub(crate) struct OpenedEnvelope<CS: CipherSuite>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     pub(crate) client_static_keypair: KeyPair<CS::KeGroup>,
-    pub(crate) export_key: GenericArray<u8, <CS::Hash as Digest>::OutputSize>,
+    pub(crate) export_key: Output<CS::Hash>,
     pub(crate) id_u: Vec<u8>,
     pub(crate) id_s: Vec<u8>,
 }
 
-pub(crate) struct OpenedInnerEnvelope<D: Hash> {
-    pub(crate) export_key: GenericArray<u8, <D as Digest>::OutputSize>,
+pub(crate) struct OpenedInnerEnvelope<D: Hash>
+where
+    <D as CoreProxy>::Core: ProxyHash,
+    <<D as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<D as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
+    pub(crate) export_key: Output<D>,
 }
 
 #[cfg(not(test))]
-type SealRawResult<CS> = (
-    Envelope<CS>,
-    GenericArray<u8, <<CS as CipherSuite>::Hash as Digest>::OutputSize>,
-);
+type SealRawResult<CS> = (Envelope<CS>, Output<<CS as CipherSuite>::Hash>);
 #[cfg(test)]
-type SealRawResult<CS> = (
-    Envelope<CS>,
-    GenericArray<u8, <<CS as CipherSuite>::Hash as Digest>::OutputSize>,
-    Vec<u8>,
-);
+type SealRawResult<CS> = (Envelope<CS>, Output<<CS as CipherSuite>::Hash>, Vec<u8>);
 #[cfg(not(test))]
 type SealResult<CS> = (
     Envelope<CS>,
     PublicKey<<CS as CipherSuite>::KeGroup>,
-    GenericArray<u8, <<CS as CipherSuite>::Hash as Digest>::OutputSize>,
+    Output<<CS as CipherSuite>::Hash>,
 );
 #[cfg(test)]
 type SealResult<CS> = (
     Envelope<CS>,
     PublicKey<<CS as CipherSuite>::KeGroup>,
-    GenericArray<u8, <<CS as CipherSuite>::Hash as Digest>::OutputSize>,
+    Output<<CS as CipherSuite>::Hash>,
     Vec<u8>,
 );
 
-impl<CS: CipherSuite> Envelope<CS> {
+impl<CS: CipherSuite> Envelope<CS>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     #[allow(clippy::type_complexity)]
     pub(crate) fn seal<R: RngCore + CryptoRng>(
         rng: &mut R,
@@ -233,9 +245,7 @@ impl<CS: CipherSuite> Envelope<CS> {
             .map_err(|_| InternalError::SealOpenHmacError)?;
 
         Ok(OpenedInnerEnvelope {
-            export_key: GenericArray::<u8, <CS::Hash as Digest>::OutputSize>::clone_from_slice(
-                &export_key,
-            ),
+            export_key: Output::<<CS as CipherSuite>::Hash>::clone_from_slice(&export_key),
         })
     }
 
@@ -244,23 +254,20 @@ impl<CS: CipherSuite> Envelope<CS> {
         Self {
             mode: InnerEnvelopeMode::Zero,
             nonce: GenericArray::default(),
-            hmac: GenericArray::clone_from_slice(&vec![
-                0u8;
-                <CS::Hash as Digest>::OutputSize::USIZE
-            ]),
+            hmac: GenericArray::default(),
         }
     }
 
     fn hmac_key_size() -> usize {
-        <CS::Hash as Digest>::OutputSize::USIZE
+        <CS::Hash>::output_size()
     }
 
     fn export_key_size() -> usize {
-        <CS::Hash as Digest>::OutputSize::USIZE
+        <CS::Hash>::output_size()
     }
 
     pub(crate) fn len() -> usize {
-        <CS::Hash as Digest>::OutputSize::USIZE + NonceLen::USIZE
+        <CS::Hash>::output_size() + NonceLen::USIZE
     }
 
     pub(crate) fn serialize(&self) -> Vec<u8> {
@@ -297,7 +304,12 @@ impl<CS: CipherSuite> Envelope<CS> {
 fn build_inner_envelope_internal<CS: CipherSuite>(
     randomized_pwd_hasher: Hkdf<CS::Hash>,
     nonce: GenericArray<u8, NonceLen>,
-) -> Result<PublicKey<CS::KeGroup>, ProtocolError> {
+) -> Result<PublicKey<CS::KeGroup>, ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     let mut keypair_seed = vec![0u8; <CS::KeGroup as KeGroup>::SkLen::USIZE];
     randomized_pwd_hasher
         .expand(&nonce.concat(STR_PRIVATE_KEY.into()), &mut keypair_seed)
@@ -315,7 +327,12 @@ fn build_inner_envelope_internal<CS: CipherSuite>(
 fn recover_keys_internal<CS: CipherSuite>(
     randomized_pwd_hasher: Hkdf<CS::Hash>,
     nonce: GenericArray<u8, NonceLen>,
-) -> Result<KeyPair<CS::KeGroup>, ProtocolError> {
+) -> Result<KeyPair<CS::KeGroup>, ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     let mut keypair_seed = vec![0u8; <CS::KeGroup as KeGroup>::SkLen::USIZE];
     randomized_pwd_hasher
         .expand(&nonce.concat(STR_PRIVATE_KEY.into()), &mut keypair_seed)

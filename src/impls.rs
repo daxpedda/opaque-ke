@@ -7,7 +7,12 @@
 macro_rules! impl_serialize_and_deserialize_for {
     ($t:ident) => {
         #[cfg(feature = "serialize")]
-        impl<CS: CipherSuite> serde::Serialize for $t<CS> {
+        impl<CS: CipherSuite> serde::Serialize for $t<CS>
+        where
+            <CS::Hash as digest::core_api::CoreProxy>::Core: crate::hash::ProxyHash,
+            <<CS::Hash as digest::core_api::CoreProxy>::Core as digest::core_api::BlockSizeUser>::BlockSize: generic_array::typenum::IsLess<generic_array::typenum::U256>,
+            generic_array::typenum::Le<<<CS::Hash as digest::core_api::CoreProxy>::Core as digest::core_api::BlockSizeUser>::BlockSize, generic_array::typenum::U256>: generic_array::typenum::NonZero,
+        {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: serde::Serializer,
@@ -24,7 +29,12 @@ macro_rules! impl_serialize_and_deserialize_for {
         }
 
         #[cfg(feature = "serialize")]
-        impl<'de, CS: CipherSuite> serde::Deserialize<'de> for $t<CS> {
+        impl<'de, CS: CipherSuite> serde::Deserialize<'de> for $t<CS>
+        where
+            <CS::Hash as digest::core_api::CoreProxy>::Core: crate::hash::ProxyHash,
+            <<CS::Hash as digest::core_api::CoreProxy>::Core as digest::core_api::BlockSizeUser>::BlockSize: generic_array::typenum::IsLess<generic_array::typenum::U256>,
+            generic_array::typenum::Le<<<CS::Hash as digest::core_api::CoreProxy>::Core as digest::core_api::BlockSizeUser>::BlockSize, generic_array::typenum::U256>: generic_array::typenum::NonZero,
+        {
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
                 D: serde::Deserializer<'de>,
@@ -36,9 +46,20 @@ macro_rules! impl_serialize_and_deserialize_for {
                     Self::deserialize(&base64::decode(s).map_err(Error::custom)?)
                         .map_err(Error::custom)
                 } else {
-                    struct ByteVisitor<CS: CipherSuite>(core::marker::PhantomData<CS>);
+                    struct ByteVisitor<CS: CipherSuite>
+                    (core::marker::PhantomData<CS>)
+                    where
+                        <CS::Hash as digest::core_api::CoreProxy>::Core: crate::hash::ProxyHash,
+                        <<CS::Hash as digest::core_api::CoreProxy>::Core as digest::core_api::BlockSizeUser>::BlockSize: generic_array::typenum::IsLess<generic_array::typenum::U256>,
+                        generic_array::typenum::Le<<<CS::Hash as digest::core_api::CoreProxy>::Core as digest::core_api::BlockSizeUser>::BlockSize, generic_array::typenum::U256>: generic_array::typenum::NonZero,
+                    ;
 
-                    impl<'de, CS: CipherSuite> serde::de::Visitor<'de> for ByteVisitor<CS> {
+                    impl<'de, CS: CipherSuite> serde::de::Visitor<'de> for ByteVisitor<CS>
+                    where
+                        <CS::Hash as digest::core_api::CoreProxy>::Core: crate::hash::ProxyHash,
+                        <<CS::Hash as digest::core_api::CoreProxy>::Core as digest::core_api::BlockSizeUser>::BlockSize: generic_array::typenum::IsLess<generic_array::typenum::U256>,
+                        generic_array::typenum::Le<<<CS::Hash as digest::core_api::CoreProxy>::Core as digest::core_api::BlockSizeUser>::BlockSize, generic_array::typenum::U256>: generic_array::typenum::NonZero,
+                    {
                         type Value = $t<CS>;
 
                         fn expecting(

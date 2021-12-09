@@ -3,6 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+use crate::hash::ProxyHash;
 use crate::key_exchange::group::KeGroup;
 use crate::{
     ciphersuite::CipherSuite,
@@ -11,6 +12,11 @@ use crate::{
     keypair::{PrivateKey, PublicKey, SecretKey},
 };
 use alloc::vec::Vec;
+use digest::core_api::{BlockSizeUser, CoreProxy};
+#[cfg(test)]
+use digest::Output;
+use generic_array::typenum::consts::U256;
+use generic_array::typenum::{IsLess, Le, NonZero};
 use rand::{CryptoRng, RngCore};
 use zeroize::Zeroize;
 
@@ -24,7 +30,7 @@ pub type GenerateKe2Result<K, D, G> = (
     <K as KeyExchange<D, G>>::KE2State,
     <K as KeyExchange<D, G>>::KE2Message,
     Vec<u8>,
-    generic_array::GenericArray<u8, <D as digest::Digest>::OutputSize>,
+    Output<D>,
 );
 #[cfg(not(test))]
 pub type GenerateKe3Result<K, D, G> = (Vec<u8>, <K as KeyExchange<D, G>>::KE3Message);
@@ -33,10 +39,15 @@ pub type GenerateKe3Result<K, D, G> = (
     Vec<u8>,
     <K as KeyExchange<D, G>>::KE3Message,
     Vec<u8>,
-    generic_array::GenericArray<u8, <D as digest::Digest>::OutputSize>,
+    Output<D>,
 );
 
-pub trait KeyExchange<D: Hash, G: KeGroup> {
+pub trait KeyExchange<D: Hash, G: KeGroup>
+where
+    <D as CoreProxy>::Core: ProxyHash,
+    <<D as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<D as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     type KE1State: FromBytes + ToBytes + Zeroize + Clone;
     type KE2State: FromBytes + ToBytes + Zeroize + Clone;
     type KE1Message: FromBytes + ToBytes + Clone;
@@ -83,7 +94,11 @@ pub trait KeyExchange<D: Hash, G: KeGroup> {
 }
 
 pub trait FromBytes: Sized {
-    fn from_bytes<CS: CipherSuite>(input: &[u8]) -> Result<Self, ProtocolError>;
+    fn from_bytes<CS: CipherSuite>(input: &[u8]) -> Result<Self, ProtocolError>
+    where
+        <CS::Hash as CoreProxy>::Core: ProxyHash,
+        <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+        Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero;
 }
 
 pub trait ToBytes {

@@ -6,13 +6,15 @@
 #![allow(unsafe_code)]
 
 use crate::{
-    ciphersuite::CipherSuite, errors::*, key_exchange::tripledh::TripleDH, opaque::*,
-    slow_hash::NoOpHash, tests::mock_rng::CycleRng, *,
+    ciphersuite::CipherSuite, errors::*, hash::ProxyHash, key_exchange::tripledh::TripleDH,
+    opaque::*, slow_hash::NoOpHash, tests::mock_rng::CycleRng, *,
 };
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use curve25519_dalek::{ristretto::RistrettoPoint, traits::Identity};
+use digest::core_api::{BlockSizeUser, CoreProxy};
+use generic_array::typenum::{IsLess, Le, NonZero, U256};
 use rand::rngs::OsRng;
 use serde_json::Value;
 use zeroize::Zeroize;
@@ -271,7 +273,12 @@ fn stringify_test_vectors(p: &TestVectorParameters) -> alloc::string::String {
     s
 }
 
-fn generate_parameters<CS: CipherSuite>() -> Result<TestVectorParameters, ProtocolError> {
+fn generate_parameters<CS: CipherSuite>() -> Result<TestVectorParameters, ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     use crate::{key_exchange::tripledh::NonceLen, keypair::KeyPair};
     use generic_array::typenum::Unsigned;
     use rand::RngCore;

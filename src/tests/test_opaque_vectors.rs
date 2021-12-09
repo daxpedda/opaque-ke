@@ -4,10 +4,12 @@
 // LICENSE file in the root directory of this source tree.
 
 use crate::{
-    ciphersuite::CipherSuite, errors::*, key_exchange::tripledh::TripleDH, opaque::*,
-    slow_hash::NoOpHash, tests::mock_rng::CycleRng, *,
+    ciphersuite::CipherSuite, errors::*, hash::ProxyHash, key_exchange::tripledh::TripleDH,
+    opaque::*, slow_hash::NoOpHash, tests::mock_rng::CycleRng, *,
 };
 use alloc::{string::ToString, vec, vec::Vec};
+use digest::core_api::{BlockSizeUser, CoreProxy};
+use generic_array::typenum::{IsLess, Le, NonZero, U256};
 use json::JsonValue;
 
 #[allow(non_snake_case)]
@@ -130,7 +132,12 @@ fn populate_test_vectors(values: &JsonValue) -> OpaqueTestVectorParameters {
 
 fn get_password_file_bytes<CS: CipherSuite>(
     parameters: &OpaqueTestVectorParameters,
-) -> Result<Vec<u8>, ProtocolError> {
+) -> Result<Vec<u8>, ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     let password_file = ServerRegistration::<CS>::finish(
         RegistrationUpload::deserialize(&parameters.registration_upload).unwrap(),
     );
@@ -236,7 +243,12 @@ fn tests() -> Result<(), ProtocolError> {
 
 fn test_registration_request<CS: CipherSuite>(
     tvs: &[OpaqueTestVectorParameters],
-) -> Result<(), ProtocolError> {
+) -> Result<(), ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     for parameters in tvs {
         let mut rng = CycleRng::new(parameters.blind_registration.to_vec());
         let client_registration_start_result =
@@ -251,7 +263,12 @@ fn test_registration_request<CS: CipherSuite>(
 
 fn test_registration_response<CS: CipherSuite>(
     tvs: &[OpaqueTestVectorParameters],
-) -> Result<(), ProtocolError> {
+) -> Result<(), ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     for parameters in tvs {
         let server_setup = ServerSetup::<CS>::deserialize(
             &[
@@ -280,7 +297,12 @@ fn test_registration_response<CS: CipherSuite>(
 
 fn test_registration_upload<CS: CipherSuite>(
     tvs: &[OpaqueTestVectorParameters],
-) -> Result<(), ProtocolError> {
+) -> Result<(), ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     for parameters in tvs {
         let mut rng = CycleRng::new(parameters.blind_registration.to_vec());
         let client_registration_start_result =
@@ -316,7 +338,12 @@ fn test_registration_upload<CS: CipherSuite>(
     Ok(())
 }
 
-fn test_ke1<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), ProtocolError> {
+fn test_ke1<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     for parameters in tvs {
         let client_login_start = [
             parameters.blind_login.as_slice(),
@@ -341,7 +368,12 @@ fn test_ke1<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), P
     Ok(())
 }
 
-fn test_ke2<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), ProtocolError> {
+fn test_ke2<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     for parameters in tvs {
         let server_setup = ServerSetup::<CS>::deserialize(
             &[
@@ -397,7 +429,12 @@ fn test_ke2<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), P
     Ok(())
 }
 
-fn test_ke3<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), ProtocolError> {
+fn test_ke3<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     for parameters in tvs {
         let client_login_start = [
             parameters.blind_login.as_slice(),
@@ -449,7 +486,12 @@ fn test_ke3<CS: CipherSuite>(tvs: &[OpaqueTestVectorParameters]) -> Result<(), P
 
 fn test_server_login_finish<CS: CipherSuite>(
     tvs: &[OpaqueTestVectorParameters],
-) -> Result<(), ProtocolError> {
+) -> Result<(), ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     for parameters in tvs {
         let server_setup = ServerSetup::<CS>::deserialize(
             &[
@@ -500,7 +542,12 @@ fn test_server_login_finish<CS: CipherSuite>(
 
 fn test_fake_vectors<CS: CipherSuite>(
     tvs: &[OpaqueTestVectorParameters],
-) -> Result<(), ProtocolError> {
+) -> Result<(), ProtocolError>
+where
+    <CS::Hash as CoreProxy>::Core: ProxyHash,
+    <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     for parameters in tvs {
         let server_setup = ServerSetup::<CS>::deserialize(
             &[

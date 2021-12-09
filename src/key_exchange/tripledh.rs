@@ -10,7 +10,7 @@ use crate::{
         utils::{check_slice_size, check_slice_size_atleast},
         InternalError, ProtocolError,
     },
-    hash::Hash,
+    hash::{Hash, ProxyHash},
     key_exchange::{
         group::KeGroup,
         traits::{FromBytes, GenerateKe2Result, GenerateKe3Result, KeyExchange, ToBytes},
@@ -22,13 +22,13 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
 use derive_where::DeriveWhere;
-use digest::{Digest, FixedOutput};
-use generic_array::{
-    typenum::{Unsigned, U32},
-    ArrayLength, GenericArray,
-};
+use digest::core_api::{BlockSizeUser, CoreProxy};
+use digest::{Digest, Output, OutputSizeUser};
+use generic_array::typenum::consts::{U256, U32};
+use generic_array::typenum::{IsLess, Le, NonZero, Unsigned};
+use generic_array::{ArrayLength, GenericArray};
 use hkdf::Hkdf;
-use hmac::{Hmac, Mac, NewMac};
+use hmac::{Hmac, Mac};
 use rand::{CryptoRng, RngCore};
 
 ///////////////
@@ -124,12 +124,17 @@ pub struct Ke3Message<HashLen: ArrayLength<u8>> {
 // ========================== //
 ////////////////////////////////
 
-impl<D: Hash, KG: KeGroup> KeyExchange<D, KG> for TripleDH {
+impl<D: Hash, KG: KeGroup> KeyExchange<D, KG> for TripleDH
+where
+    <D as CoreProxy>::Core: ProxyHash,
+    <<D as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<D as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     type KE1State = Ke1State<KG>;
-    type KE2State = Ke2State<<D as FixedOutput>::OutputSize>;
+    type KE2State = Ke2State<<D as OutputSizeUser>::OutputSize>;
     type KE1Message = Ke1Message<KG>;
-    type KE2Message = Ke2Message<KG, <D as FixedOutput>::OutputSize>;
-    type KE3Message = Ke3Message<<D as FixedOutput>::OutputSize>;
+    type KE2Message = Ke2Message<KG, <D as OutputSizeUser>::OutputSize>;
+    type KE3Message = Ke3Message<<D as OutputSizeUser>::OutputSize>;
 
     fn generate_ke1<R: RngCore + CryptoRng>(
         rng: &mut R,
@@ -167,14 +172,14 @@ impl<D: Hash, KG: KeGroup> KeyExchange<D, KG> for TripleDH {
         let server_nonce = generate_nonce::<R>(rng);
 
         let mut transcript_hasher = D::new()
-            .chain(STR_RFC)
-            .chain(&serialize(&context, 2).map_err(ProtocolError::into_custom)?)
-            .chain(&id_u)
-            .chain(serialized_credential_request)
-            .chain(&id_s)
-            .chain(l2_bytes)
-            .chain(server_nonce)
-            .chain(&server_e_kp.public().to_arr());
+            .chain_update(STR_RFC)
+            .chain_update(&serialize(&context, 2).map_err(ProtocolError::into_custom)?)
+            .chain_update(&id_u)
+            .chain_update(serialized_credential_request)
+            .chain_update(&id_s)
+            .chain_update(l2_bytes)
+            .chain_update(server_nonce)
+            .chain_update(&server_e_kp.public().to_arr());
 
         let result = derive_3dh_keys::<D, KG, S>(
             TripleDHComponents {
@@ -193,7 +198,7 @@ impl<D: Hash, KG: KeGroup> KeyExchange<D, KG> for TripleDH {
         mac_hasher.update(&transcript_hasher.clone().finalize());
         let mac = mac_hasher.finalize().into_bytes();
 
-        transcript_hasher.update(&mac);
+        Digest::update(&mut transcript_hasher, &mac);
 
         Ok((
             Ke2State {
@@ -226,13 +231,13 @@ impl<D: Hash, KG: KeGroup> KeyExchange<D, KG> for TripleDH {
         context: Vec<u8>,
     ) -> Result<GenerateKe3Result<Self, D, KG>, ProtocolError> {
         let mut transcript_hasher = D::new()
-            .chain(STR_RFC)
-            .chain(&serialize(&context, 2)?)
-            .chain(&id_u)
-            .chain(&serialized_credential_request)
-            .chain(&id_s)
-            .chain(l2_component)
-            .chain(&ke2_message.to_bytes_without_info_or_mac());
+            .chain_update(STR_RFC)
+            .chain_update(&serialize(&context, 2)?)
+            .chain_update(&id_u)
+            .chain_update(&serialized_credential_request)
+            .chain_update(&id_s)
+            .chain_update(l2_component)
+            .chain_update(&ke2_message.to_bytes_without_info_or_mac());
 
         let result = derive_3dh_keys::<D, KG, PrivateKey<KG>>(
             TripleDHComponents {
@@ -254,7 +259,7 @@ impl<D: Hash, KG: KeGroup> KeyExchange<D, KG> for TripleDH {
             .verify(&ke2_message.mac)
             .map_err(|_| ProtocolError::InvalidLoginError)?;
 
-        transcript_hasher.update(ke2_message.mac.to_vec());
+        Digest::update(&mut transcript_hasher, ke2_message.mac.to_vec());
 
         let mut client_mac =
             Hmac::<D>::new_from_slice(&result.2).map_err(|_| InternalError::HmacError)?;
@@ -289,7 +294,7 @@ impl<D: Hash, KG: KeGroup> KeyExchange<D, KG> for TripleDH {
     }
 
     fn ke2_message_size() -> usize {
-        NonceLen::USIZE + <KG as KeGroup>::PkLen::USIZE + <D as FixedOutput>::OutputSize::USIZE
+        NonceLen::USIZE + <KG as KeGroup>::PkLen::USIZE + D::output_size()
     }
 }
 
@@ -312,18 +317,9 @@ struct TripleDHComponents<KG: KeGroup, S: SecretKey<KG>> {
 // Consists of a session key, followed by two mac keys: (session_key, km2, km3)
 #[cfg(not(test))]
 #[allow(clippy::upper_case_acronyms)]
-type TripleDHDerivationResult<D> = (
-    GenericArray<u8, <D as FixedOutput>::OutputSize>,
-    GenericArray<u8, <D as FixedOutput>::OutputSize>,
-    GenericArray<u8, <D as FixedOutput>::OutputSize>,
-);
+type TripleDHDerivationResult<D> = (Output<D>, Output<D>, Output<D>);
 #[cfg(test)]
-type TripleDHDerivationResult<D> = (
-    GenericArray<u8, <D as FixedOutput>::OutputSize>,
-    GenericArray<u8, <D as FixedOutput>::OutputSize>,
-    GenericArray<u8, <D as FixedOutput>::OutputSize>,
-    Vec<u8>,
-);
+type TripleDHDerivationResult<D> = (Output<D>, Output<D>, Output<D>, Vec<u8>);
 
 ////////////////////////////////////////////////
 // Helper functions and Trait Implementations //
@@ -337,7 +333,12 @@ type TripleDHDerivationResult<D> = (
 fn derive_3dh_keys<D: Hash, KG: KeGroup, S: SecretKey<KG>>(
     dh: TripleDHComponents<KG, S>,
     hashed_derivation_transcript: &[u8],
-) -> Result<TripleDHDerivationResult<D>, ProtocolError<S::Error>> {
+) -> Result<TripleDHDerivationResult<D>, ProtocolError<S::Error>>
+where
+    <D as CoreProxy>::Core: ProxyHash,
+    <<D as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<D as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     let ikm: Vec<u8> = [
         dh.sk1
             .diffie_hellman(dh.pk1)
@@ -363,20 +364,10 @@ fn derive_3dh_keys<D: Hash, KG: KeGroup, S: SecretKey<KG>>(
     )
     .map_err(ProtocolError::into_custom)?;
 
-    let km2 = hkdf_expand_label::<D>(
-        &handshake_secret,
-        STR_SERVER_MAC,
-        b"",
-        <D as Digest>::OutputSize::USIZE,
-    )
-    .map_err(ProtocolError::into_custom)?;
-    let km3 = hkdf_expand_label::<D>(
-        &handshake_secret,
-        STR_CLIENT_MAC,
-        b"",
-        <D as Digest>::OutputSize::USIZE,
-    )
-    .map_err(ProtocolError::into_custom)?;
+    let km2 = hkdf_expand_label::<D>(&handshake_secret, STR_SERVER_MAC, b"", D::output_size())
+        .map_err(ProtocolError::into_custom)?;
+    let km3 = hkdf_expand_label::<D>(&handshake_secret, STR_CLIENT_MAC, b"", D::output_size())
+        .map_err(ProtocolError::into_custom)?;
 
     Ok((
         GenericArray::clone_from_slice(&session_key),
@@ -392,7 +383,12 @@ fn hkdf_expand_label<D: Hash>(
     label: &[u8],
     context: &[u8],
     length: usize,
-) -> Result<Vec<u8>, ProtocolError> {
+) -> Result<Vec<u8>, ProtocolError>
+where
+    <D as CoreProxy>::Core: ProxyHash,
+    <<D as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<D as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     let h = Hkdf::<D>::from_prk(secret).map_err(|_| InternalError::HkdfError)?;
     hkdf_expand_label_extracted(&h, label, context, length)
 }
@@ -402,7 +398,12 @@ fn hkdf_expand_label_extracted<D: Hash>(
     label: &[u8],
     context: &[u8],
     length: usize,
-) -> Result<Vec<u8>, ProtocolError> {
+) -> Result<Vec<u8>, ProtocolError>
+where
+    <D as CoreProxy>::Core: ProxyHash,
+    <<D as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<D as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
     let mut okm = vec![0u8; length];
 
     let mut hkdf_label: Vec<u8> = Vec::new();
@@ -426,13 +427,13 @@ fn derive_secrets<D: Hash>(
     hkdf: &Hkdf<D>,
     label: &[u8],
     hashed_derivation_transcript: &[u8],
-) -> Result<Vec<u8>, ProtocolError> {
-    hkdf_expand_label_extracted::<D>(
-        hkdf,
-        label,
-        hashed_derivation_transcript,
-        <D as Digest>::OutputSize::USIZE,
-    )
+) -> Result<Vec<u8>, ProtocolError>
+where
+    <D as CoreProxy>::Core: ProxyHash,
+    <<D as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+    Le<<<D as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+{
+    hkdf_expand_label_extracted::<D>(hkdf, label, hashed_derivation_transcript, D::output_size())
 }
 
 // Generate a random nonce up to NonceLen::USIZE bytes.
@@ -445,7 +446,12 @@ fn generate_nonce<R: RngCore + CryptoRng>(rng: &mut R) -> GenericArray<u8, Nonce
 // Serialization and deserialization implementations
 
 impl<KG: KeGroup> FromBytes for Ke1State<KG> {
-    fn from_bytes<CS: CipherSuite>(bytes: &[u8]) -> Result<Self, ProtocolError> {
+    fn from_bytes<CS: CipherSuite>(bytes: &[u8]) -> Result<Self, ProtocolError>
+    where
+        <CS::Hash as CoreProxy>::Core: ProxyHash,
+        <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+        Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+    {
         let key_len = <KG as KeGroup>::SkLen::USIZE;
 
         let nonce_len = NonceLen::USIZE;
@@ -468,7 +474,12 @@ impl<KG: KeGroup> ToBytes for Ke1State<KG> {
 }
 
 impl<KG: KeGroup> FromBytes for Ke1Message<KG> {
-    fn from_bytes<CS: CipherSuite>(ke1_message_bytes: &[u8]) -> Result<Self, ProtocolError> {
+    fn from_bytes<CS: CipherSuite>(ke1_message_bytes: &[u8]) -> Result<Self, ProtocolError>
+    where
+        <CS::Hash as CoreProxy>::Core: ProxyHash,
+        <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+        Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+    {
         let nonce_len = NonceLen::USIZE;
         let checked_nonce = check_slice_size(
             ke1_message_bytes,
@@ -490,7 +501,12 @@ impl<KG: KeGroup> ToBytes for Ke1Message<KG> {
 }
 
 impl<HashLen: ArrayLength<u8>> FromBytes for Ke2State<HashLen> {
-    fn from_bytes<CS: CipherSuite>(input: &[u8]) -> Result<Self, ProtocolError> {
+    fn from_bytes<CS: CipherSuite>(input: &[u8]) -> Result<Self, ProtocolError>
+    where
+        <CS::Hash as CoreProxy>::Core: ProxyHash,
+        <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+        Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+    {
         let hash_len = HashLen::USIZE;
         let checked_bytes = check_slice_size(input, 3 * hash_len, "ke2_state")?;
 
@@ -516,7 +532,12 @@ impl<HashLen: ArrayLength<u8>> ToBytes for Ke2State<HashLen> {
 }
 
 impl<KG: KeGroup, HashLen: ArrayLength<u8>> FromBytes for Ke2Message<KG, HashLen> {
-    fn from_bytes<CS: CipherSuite>(input: &[u8]) -> Result<Self, ProtocolError> {
+    fn from_bytes<CS: CipherSuite>(input: &[u8]) -> Result<Self, ProtocolError>
+    where
+        <CS::Hash as CoreProxy>::Core: ProxyHash,
+        <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+        Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+    {
         let key_len = <KG as KeGroup>::PkLen::USIZE;
         let nonce_len = NonceLen::USIZE;
         let checked_nonce = check_slice_size_atleast(input, nonce_len, "ke2_message nonce")?;
@@ -558,7 +579,12 @@ impl<KG: KeGroup, HashLen: ArrayLength<u8>> Ke2Message<KG, HashLen> {
 }
 
 impl<HashLen: ArrayLength<u8>> FromBytes for Ke3Message<HashLen> {
-    fn from_bytes<CS: CipherSuite>(bytes: &[u8]) -> Result<Self, ProtocolError> {
+    fn from_bytes<CS: CipherSuite>(bytes: &[u8]) -> Result<Self, ProtocolError>
+    where
+        <CS::Hash as CoreProxy>::Core: ProxyHash,
+        <<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
+        Le<<<CS::Hash as CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
+    {
         let checked_bytes = check_slice_size(bytes, HashLen::USIZE, "ke3_message")?;
 
         Ok(Self {
