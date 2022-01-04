@@ -46,7 +46,7 @@ p256_ = { package = "p256", version = "0.10", default-features = false, features
 rand = { version = "0.8", default-features = false }
 serde_ = { version = "1", package = "serde", default-features = false, features = ["derive"], optional = true }
 subtle = { version = "2.3", default-features = false }
-voprf = { git = "https://github.com/novifinancial/voprf", rev = "55ef981a3f9a12eddd8c372ffdf51818011343ee", default-features = false, features = ["danger"] }
+voprf = { version = "0.3", default-features = false, features = ["danger"] }
 x25519-dalek = { version = "1", default-features = false, optional = true }
 zeroize = { version = "1", features = ["zeroize_derive"] }
 
@@ -72,3 +72,8 @@ rustyline = "~9.0"
 [[bench]]
 name = "opaque"
 harness = false
+
+[patch.crates-io]
+hash2field = { git = "https://github.com/khonsulabs/hash2field", branch = "update-deps" }
+p256 = { git = "https://github.com/mikelodder7/elliptic-curves" }
+voprf = { git = "https://github.com/khonsulabs/voprf", branch = "testing-hash2field" }
