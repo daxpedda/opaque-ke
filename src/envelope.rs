@@ -61,7 +61,7 @@ fn recover_keys_internal<CS: CipherSuite>(
     Ok(client_static_keypair)
 }
 
-#[derive(Clone, Copy, PartialEq, Zeroize)]
+#[derive(Clone, PartialEq, Zeroize)]
 #[zeroize(drop)]
 pub(crate) enum InnerEnvelopeMode {
     Zero = 0,
